@@ -1,18 +1,20 @@
-import levelup from "levelup";
-import leveldown from "leveldown";
 import uuid from "uuid";
 import assert from "assert";
 import { createBrowser, createReportWithBrowser } from "./lighthouse-util.js";
-import Jobs from "level-jobs";
+import { getStore } from "./store";
+import { getQueue } from "./schedule";
 
-export function createReportStore() {
-  const database = leveldown("./store");
-  return levelup(database);
-}
+const reportGenerationQueue = getQueue("report-generation");
 
-async function doReportWork(store, payload) {
-  assert(payload.id, "Expected payload to have an id");
-  assert(payload.url, "Expected payload to have a url");
+reportGenerationQueue.process(doReportWork);
+
+async function doReportWork(job) {
+  const payload = job.data;
+
+  if (!(payload && payload.id && payload.url)) {
+    console.warn("doReportWork received invalid payload", payload);
+    return job.moveToFailed("Invalid payload");
+  }
   
   const browser = await createBrowser();  
 
@@ -31,27 +33,11 @@ async function doReportWork(store, payload) {
     result
   });
 
-  await store.put(payload.id, JSON.stringify(document));
+  const store = await getStore();
+  await store.set(payload.id, JSON.stringify(document));
 }
 
-function createReportWorker(store) {
-  return (unused, payload, callback) => {
-    doReportWork(store, payload)
-      .then(
-        () => callback(),
-        (error) => callback(error)
-      );
-  };
-}
-
-export function createReportQueue(store) {
-  const options = {
-    maxConcurrency: 1
-  };
-  return Jobs(store, createReportWorker(store), options);
-}
-
-export async function requestGenerateReport(store, queue, url, options = { output: "html" }) {
+export async function requestGenerateReport(url, options = { output: "html" }) {
   const id = `report:${uuid.v4()}`;
   // Notice the use of JSON.stringify, levelup will accept Buffers or strings, so we want
   // to use JSON for our value
@@ -60,9 +46,11 @@ export async function requestGenerateReport(store, queue, url, options = { outpu
     url,
     options
   };
-  await store.put(id, JSON.stringify(document));
-  await new Promise(
-    (resolve, reject) => queue.push(document, error => error ? reject(error) : resolve())
-  );
+  const store = await getStore();
+  await store.set(id, JSON.stringify(document));
+  await reportGenerationQueue.add(document, {
+    removeOnComplete: true,
+    removeOnFail: true // We have no way to handle this atm 
+  });
   return id;
 }
