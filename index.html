@@ -1,6 +1,8 @@
 <html>
 <body>
 <textarea id="urls" rows="10"></textarea>
+<textarea id="options" rows="10">{
+}</textarea>
 <button id="schedule" type="button">Schedule Reports</button>
 <ul id="results"></ul>
 <script type="application/javascript">
@@ -8,7 +10,47 @@
 
 const urls = document.querySelector("#urls"),
       schedule = document.querySelector("#schedule"),
-      results = document.querySelector("#results");
+      results = document.querySelector("#results"),
+      options = document.querySelector("#options");
+
+// Try and init our options from storage
+try {
+  options.value = localStorage.getItem("report-options") || "{}";
+} catch(e) {
+
+}
+
+// Reset our options so they're nicely formatted
+getOptions();
+
+// When we blur, try and validate the options, and then make it pretty 
+options.addEventListener("blur", getOptions);
+
+function getOptions() {
+  let providedOptions = {};
+  try {
+    const value = (options.value || "{}").trim();
+    // If its an object, good to go
+    if (value && value[0] === "{" && value[value.length - 1] === "}") {
+      providedOptions = JSON.parse(value);
+    } else if (value) {
+      // Not an object
+      throw new Error("Invalid options!");
+    }
+  } catch (e) {
+    return alert("Could not parse options as JSON");
+  }
+  // Set our options to a nice formatted version
+  const string = JSON.stringify(providedOptions, undefined, "  ");
+  try {
+    localStorage.setItem("report-options", string);
+  } catch(e) {
+
+  }
+  options.value = string;
+  // We want to receive an html output
+  return Object.assign({}, providedOptions, { output: "html" })
+}
 
 function processUrls(value) {
  	if (!value) {
@@ -52,27 +94,109 @@ function deleteExternalReport(identifier) {
   	.catch(console.warn)
 }
 
-function checkResults(element, identifier, originalUrl) {
+function deleteReport(parentNode, identifier) {
+  fetch(
+    `/report/${identifier}`,
+    {
+      method: "DELETE"
+    }
+  )
+    .then(() => parentNode.remove())
+    .catch((error) => {
+      console.warn(error);
+      alert("Couldn't delete report!");
+    })
+}
+
+function deleteResult(parentNode, identifier, resultIdentifier) {
+  fetch(
+    `/report/${identifier}/result/${resultIdentifier}`,
+    {
+      method: "DELETE"
+    }
+  )
+    .then(() => parentNode.remove())
+    .catch((error) => {
+      console.warn(error);
+      alert("Couldn't delete result!");
+    })
+}
+
+function displayReport(element, identifier, originalUrl, report, onDelete = undefined) {
+  // Empty out the element
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+
+  if (!report.results) {
+    const info = document.createElement("span");
+    info.innerText = "Waiting for report generation";
+    element.appendChild(info);
+  } else {
+    report.results
+      .forEach(
+        ({ id: resultId, createdAt }, index, array) => {
+          const span = document.createElement("span");
+          const link = document.createElement("a");
+          link.innerText = `Report generated for ${originalUrl} at ${new Date(createdAt).toString()} (Report ${index + 1})`;
+          link.href = `/report/${identifier}/result/${resultId}?html=1`;
+          link.target = "_blank";
+          span.appendChild(link);
+          const deleteButton = document.createElement("button");
+          deleteButton.innerText = "Delete";
+          deleteButton.addEventListener("click", () => deleteResult(span, identifier, resultId));
+          span.appendChild(deleteButton);
+          element.appendChild(span);
+          if (array.length > (index + 1)) {
+            // Add a line break in between each report:
+            element.appendChild(
+              document.createElement("br")
+            );
+          }
+        }
+      );
+  }
+
+  const deleteButton = document.createElement("button");
+  deleteButton.innerText = "Delete Report";
+  deleteButton.addEventListener("click", () =>{
+    deleteReport(element, identifier);
+    if (onDelete) {
+      onDelete();
+    }
+  });
+  element.appendChild(deleteButton);
+}
+
+function checkResults(element, identifier, originalUrl, report = undefined) {
+
   const intervalHandle = setInterval(doCheck, 2500);
+  let secondaryIntervalHandle;
+
+  const onDelete = () => {
+    if (secondaryIntervalHandle) {
+      clearInterval(secondaryIntervalHandle);
+    } else {
+      clearInterval(intervalHandle);
+    }
+  };
+
+  displayReport(element, identifier, originalUrl, report || { id: identifier, url: originalUrl }, onDelete);
+
   function doCheck() {
     fetch(`/report/${identifier}`)
     	.then(response => response.json())
     	.then(report => {
-      	if (!(report.result && report.result.report)) {
-        	return;
+      	if (report.results) {
+        	// Clear the old interval
+          clearInterval(intervalHandle);
+
+          // Now try every minute
+          if (!secondaryIntervalHandle) {
+            secondaryIntervalHandle = setInterval(doCheck, 60 * 1000);
+          }
         }
-      	// We don't need to check again
-      	clearInterval(intervalHandle);
-      	// Create a data uri that can be opened directly
-      	const link = document.createElement("a");
-      	link.innerText = `Complete: ${originalUrl}`;
-      	// Open up in a new tab
-      	link.target = "_blank";
-      	link.href = URL.createObjectURL(new Blob([report.result.report], { type: "text/html" }));
-      	// Empty out the element
-      	element.innerHTML = ``;
-      	element.appendChild(link);
-				deleteExternalReport(identifier);
+        displayReport(element, identifier, originalUrl, report, onDelete);
     	})
     	.catch(console.warn)
   }
@@ -82,26 +206,45 @@ function displayResults(identifiers) {
 	identifiers.forEach(
 		// Each item will be an array with the original url and the new identifier
     ([originalUrl, identifier]) => {
-    	const element = document.createElement("li");
-			element.innerText = `Processing: ${originalUrl}`;
-			// Append to our results list
+      const element = document.createElement("li");
       results.appendChild(element);
-			checkResults(element, identifier, originalUrl);
+      checkResults(element, identifier, originalUrl);
     }
   )
 }
 
+function loadReports() {
+  fetch("/report", {
+    headers: {
+      Accept: "application/json"
+    }
+  })  
+    .then(response => response.json())
+    .then(reports => {
+      reports.forEach(
+        report => {
+          const element = document.createElement("li");
+          results.appendChild(element);
+          checkResults(element, report.id, report.url, report);
+        }
+      );
+    })
+    .catch(error => {
+      alert("Unable to load reports");
+      console.warn(error);
+    });
+}
+loadReports();
+
 function send(urls) {
 	 // We want to receive an html output
-  const options = {
-  	output: "html" 
-  };
+  const options = getOptions();
   fetch("/report", {
 		method: "POST",
     headers: {
     	"Content-Type": "application/json" 
     },
-    body: JSON.stringify(urls.map(url => ({ url })))
+    body: JSON.stringify(urls.map(url => ({ url, options })))
   })
   	.then(response => response.json())
   	.then(displayResults)

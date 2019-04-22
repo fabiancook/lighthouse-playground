@@ -1,5 +1,5 @@
 import express from "express";
-import { requestGenerateReport, getReportWithResult } from "./reports.js";
+import { requestGenerateReport, getReport, removeReport, getReportResultDocument, removeReportResult, listReports } from "./reports.js";
 import assert from "assert";
 import { getStore } from "./store";
 import { asyncHandler } from "./handler";
@@ -27,7 +27,7 @@ app.post("/report", express.json(), asyncHandler(async (request, response) => {
 }));
 
 app.get("/report/:id", asyncHandler(async (request, response) => {
-  const report = await getReportWithResult(request.params.id);
+  const report = await getReport(request.params.id);
   if (!report) {
     return response.sendStatus(404); // We couldn't find it
   }
@@ -36,15 +36,35 @@ app.get("/report/:id", asyncHandler(async (request, response) => {
   return response.send(report);
 }));
 
-app.delete("/report/:id", asyncHandler(async (request, response) => {
-  const store = await getStore();
-  const report = await store.get(request.params.id);
-  if (!report) {
-    return response.sendStatus(404); // We couldn't find it, may have already been deleted
+app.get("/report/:id/result/:resultId", asyncHandler(async (request, response) => {
+  const result = await getReportResultDocument(request.params.id, request.params.resultId);
+  if (!result) {
+    return response.sendStatus(404);
   }
-  await store.del(request.params.id);
-  response.sendStatus(204);
+  if (request.query.html) {
+    response.set("Content-Type", "text/html");
+    // result.report is an HTML string
+    return response.send(result.report);
+  } else {
+    // JSON by default with all the contents
+    response.set("Content-Type", "application/json");
+    return response.send(result);
+  }
 }));
+
+app.delete("/report/:id", asyncHandler(async (request, response) => {
+  const foundAndDeleted = await removeReport(request.params.id);
+  response.sendStatus(foundAndDeleted ? 204 : 404);
+}));
+
+app.delete("/report/:id/result/:resultId", asyncHandler(async (request, response) => {
+  const foundAndDeleted = await removeReportResult(request.params.id, request.params.resultId);
+  response.sendStatus(foundAndDeleted ? 204 : 404);
+}));
+
+app.get("/report", asyncHandler(async (request, response) => {
+  response.json(await listReports());
+}))
 
 app.get("/", (request, response) => response.sendFile(`${process.cwd()}/index.html`));
 

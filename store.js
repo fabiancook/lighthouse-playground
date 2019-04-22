@@ -2,9 +2,10 @@ import { createClient } from "redis";
 import { promisify } from "util";
 
 function getPromiseClient(client) {
-  client.set = promisify(client.set.bind(client))
-  client.get = promisify(client.get.bind(client))
-  client.del = promisify(client.del.bind(client))
+  client.set = promisify(client.set.bind(client));
+  client.get = promisify(client.get.bind(client));
+  client.del = promisify(client.del.bind(client));
+  client.keys = promisify(client.keys.bind(client));
   return client;
 }
 
