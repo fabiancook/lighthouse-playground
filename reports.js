@@ -3,10 +3,11 @@ import assert from "assert";
 import { createBrowser, createReportWithBrowser } from "./lighthouse-util.js";
 import { getStore } from "./store";
 import { getQueue } from "./schedule";
+import { putDocument, getDocument } from "./storage";
 
 const reportGenerationQueue = getQueue("report-generation");
 
-reportGenerationQueue.process(doReportWork);
+reportGenerationQueue.process(1, doReportWork);
 
 async function doReportWork(job) {
   const payload = job.data;
@@ -16,8 +17,11 @@ async function doReportWork(job) {
     return job.moveToFailed("Invalid payload");
   }
   
+  console.log(`Creating browser instance for ${payload.id}`);
   const browser = await createBrowser();  
 
+
+  console.log(`Creating report for ${payload.id}`);
   const result = await createReportWithBrowser(
     browser,
     payload.url,
@@ -29,8 +33,22 @@ async function doReportWork(job) {
   // Save our result ready to be retrieved by the client
   console.log(`Saving report for ${payload.id}`);
 
+  const reportPath = `${uuid.v4()}.json`;
+
+  await putDocument(
+    reportPath, 
+    Buffer.from(
+      JSON.stringify(result),
+      "utf-8"
+    )
+  )
+    .catch((error) => {
+      console.warn('Error while saving document', error);
+      return Promise.reject(error);
+    })
+
   const document = Object.assign({}, payload, {
-    result
+    reportPath
   });
 
   const store = await getStore();
@@ -53,4 +71,22 @@ export async function requestGenerateReport(url, options = { output: "html" }) {
     removeOnFail: true // We have no way to handle this atm 
   });
   return id;
+}
+
+export async function getReportWithResult(id) {
+  const store = await getStore();
+  const documentJSON = await store.get(id);
+  if (!documentJSON) {
+    return undefined;
+  }
+  const document = JSON.parse(documentJSON);
+  if (!document.reportPath) {
+    // Not complete
+    return document;
+  }
+  const reportJSONBuffer = await getDocument(document.reportPath);
+  if (!reportJSONBuffer) {
+    throw new Error("Unable to find report result"); 
+  }
+  return Object.assign({}, document, { result: JSON.parse(reportJSONBuffer.toString("utf-8")) });
 }

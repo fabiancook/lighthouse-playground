@@ -1,5 +1,5 @@
 import express from "express";
-import { requestGenerateReport } from "./reports.js";
+import { requestGenerateReport, getReportWithResult } from "./reports.js";
 import assert from "assert";
 import { getStore } from "./store";
 import { asyncHandler } from "./handler";
@@ -27,8 +27,7 @@ app.post("/report", express.json(), asyncHandler(async (request, response) => {
 }));
 
 app.get("/report/:id", asyncHandler(async (request, response) => {
-  const store = await getStore();
-  const report = await store.get(request.params.id);
+  const report = await getReportWithResult(request.params.id);
   if (!report) {
     return response.sendStatus(404); // We couldn't find it
   }
