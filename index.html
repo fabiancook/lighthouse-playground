@@ -1,0 +1,128 @@
+<html>
+<body>
+<textarea id="urls" rows="10"></textarea>
+<button id="schedule" type="button">Schedule Reports</button>
+<ul id="results"></ul>
+<script type="application/javascript">
+/* Our code will code here */
+
+const urls = document.querySelector("#urls"),
+      schedule = document.querySelector("#schedule"),
+      results = document.querySelector("#results");
+
+function processUrls(value) {
+ 	if (!value) {
+		return { message: "No urls provided" }; 
+  }
+  
+  const validatedUrls = value
+  	.split("\n") // Split by line
+  	.reduce((urls, split) => urls.concat(split.split(",")), []) // Split by comma
+  	.map(url => url.trim()) // Trim each value, so we don't have extra white space
+  	.map(url => {
+ 			// Creating a URL will do the "validation" for us, it will throw if it is invalid
+			try {
+        const instance = new URL(url);
+        if (!instance.origin || !instance.protocol) {
+          // We want to have an origin or protocol so that 
+          // we can reference it correctly in our service
+        	return false;
+        }
+				return instance.toString();
+      } catch(e) {
+        // Return false if any errors so we can alert the user of an issue
+       	return false; 
+      }
+    });
+  
+	// So we can visualise whats happening in our dev tools
+	console.log({ validatedUrls });
+  
+  if (validatedUrls.includes(false)) {
+  	return { message: "One or more url provided is not valid" };
+  } 
+  
+  return { validUrls: validatedUrls };
+}
+
+function deleteExternalReport(identifier) {
+  fetch(`/report/${identifier}`, {
+		method: "DELETE"
+  })
+  	.catch(console.warn)
+}
+
+function checkResults(element, identifier, originalUrl) {
+  const intervalHandle = setInterval(doCheck, 2500);
+  function doCheck() {
+    fetch(`/report/${identifier}`)
+    	.then(response => response.json())
+    	.then(report => {
+      	if (!(report.result && report.result.report)) {
+        	return;
+        }
+      	// We don't need to check again
+      	clearInterval(intervalHandle);
+      	// Create a data uri that can be opened directly
+      	const link = document.createElement("a");
+      	link.innerText = `Complete: ${originalUrl}`;
+      	// Open up in a new tab
+      	link.target = "_blank";
+      	link.href = URL.createObjectURL(new Blob([report.result.report], { type: "text/html" }));
+      	// Empty out the element
+      	element.innerHTML = ``;
+      	element.appendChild(link);
+				deleteExternalReport(identifier);
+    	})
+    	.catch(console.warn)
+  }
+}
+
+function displayResults(identifiers) {
+	identifiers.forEach(
+		// Each item will be an array with the original url and the new identifier
+    ([originalUrl, identifier]) => {
+    	const element = document.createElement("li");
+			element.innerText = `Processing: ${originalUrl}`;
+			// Append to our results list
+      results.appendChild(element);
+			checkResults(element, identifier, originalUrl);
+    }
+  )
+}
+
+function send(urls) {
+	 // We want to receive an html output
+  const options = {
+  	output: "html" 
+  };
+  fetch("/report", {
+		method: "POST",
+    headers: {
+    	"Content-Type": "application/json" 
+    },
+    body: JSON.stringify(urls.map(url => ({ url })))
+  })
+  	.then(response => response.json())
+  	.then(displayResults)
+  	.catch(() => alert("Something went wrong while sending our request"))
+}
+
+schedule.addEventListener("click", () => {
+  const value = urls.value;
+  
+  const { validUrls, message } = processUrls(value);
+  
+  if (message) {
+  	return alert(message); 
+  }
+  
+  // Clear out the textarea so we can schedule more urls
+  urls.value = "";
+  
+  // Trigger the process
+  send(validUrls);
+});
+
+</script>
+</html>

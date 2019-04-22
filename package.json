@@ -1,0 +1,23 @@
+{
+  "name": "lighthouse-playground",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node -r esm service.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.16.4",
+    "level-jobs": "^2.1.0",
+    "leveldown": "^5.0.1",
+    "levelup": "^4.0.1",
+    "lighthouse": "^4.3.0",
+    "puppeteer": "^1.14.0",
+    "uuid": "^3.3.2"
+  },
+  "devDependencies": {
+    "esm": "^3.2.22"
+  }
+}
